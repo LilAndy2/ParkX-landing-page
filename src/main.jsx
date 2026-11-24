@@ -14,6 +14,11 @@ import {
   X,
 } from 'lucide-react'
 import './styles.css'
+import { initAnalytics, track } from './analytics'
+
+initAnalytics()
+
+const FORMSPREE_ID = import.meta.env.VITE_FORMSPREE_ID
 
 const steps = [
   {
@@ -40,10 +45,30 @@ function App() {
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [email, setEmail] = React.useState('')
   const [submitted, setSubmitted] = React.useState(false)
+  const [status, setStatus] = React.useState('idle') // idle | sending | error
+  const [started, setStarted] = React.useState(false)
 
-  const handleSubmit = (event) => {
+  const trackCta = (location) => () => track('cta_clicked', { location })
+
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    if (email.trim()) setSubmitted(true)
+    if (!email.trim() || status === 'sending') return
+    setStatus('sending')
+    try {
+      if (!FORMSPREE_ID) throw new Error('Missing VITE_FORMSPREE_ID')
+      const response = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ email: email.trim(), source: 'parkx-landing-page' }),
+      })
+      if (!response.ok) throw new Error(`Formspree responded ${response.status}`)
+      track('waitlist_submitted')
+      setSubmitted(true)
+      setStatus('idle')
+    } catch (error) {
+      track('waitlist_failed', { message: error.message })
+      setStatus('error')
+    }
   }
 
   return (
@@ -66,7 +91,14 @@ function App() {
             <a href="#story" onClick={() => setMenuOpen(false)}>
               Why ParkX
             </a>
-            <a className="nav-cta" href="#join" onClick={() => setMenuOpen(false)}>
+            <a
+              className="nav-cta"
+              href="#join"
+              onClick={() => {
+                setMenuOpen(false)
+                track('cta_clicked', { location: 'nav' })
+              }}
+            >
               Get early access <ArrowUpRight size={16} />
             </a>
           </div>
@@ -96,7 +128,7 @@ function App() {
               owners turn empty hours into extra income.
             </p>
             <div className="hero-actions">
-              <a className="button button-dark" href="#join">
+              <a className="button button-dark" href="#join" onClick={trackCta('hero')}>
                 Find your spot <ArrowUpRight size={17} />
               </a>
               <a className="text-link" href="#owners">
@@ -314,7 +346,7 @@ function App() {
                   Get paid securely, automatically
                 </li>
               </ul>
-              <a className="button button-dark" href="#join">
+              <a className="button button-dark" href="#join" onClick={trackCta('owners')}>
                 List your space <ArrowUpRight size={17} />
               </a>
             </div>
@@ -381,12 +413,27 @@ function App() {
                       placeholder="Your email address"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => {
+                        if (!started) {
+                          setStarted(true)
+                          track('waitlist_form_started')
+                        }
+                      }}
                       required
                     />
-                    <button type="submit" aria-label="Join waitlist">
+                    <button
+                      type="submit"
+                      aria-label="Join waitlist"
+                      disabled={status === 'sending'}
+                    >
                       <ArrowUpRight size={20} />
                     </button>
                   </div>
+                  {status === 'error' && (
+                    <small className="form-error" role="alert">
+                      Something went wrong. Please try again.
+                    </small>
+                  )}
                   <small>No spam. Just useful updates from ParkX.</small>
                 </form>
               )}
